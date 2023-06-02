@@ -1,0 +1,17 @@
+{
+  "name": "node-imap",
+  "version": "1.0.0",
+  "engines": {
+    "node": ">=14.19.3 <16.15.1",
+    "npm": ">=6.14.17"
+  },
+  "scripts": {
+    "start": "npx ts-node main.ts"
+  },
+  "dependencies": {
+    "imap": "^0.8.19"
+  },
+  "devDependencies": {
+    "@types/imap": "^0.8.35"
+  }
+}
