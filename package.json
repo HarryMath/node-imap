@@ -12,6 +12,6 @@
     "imap": "^0.8.19"
   },
   "devDependencies": {
-    "@types/imap": "^0.8.35"
+    "@types/imap": "^0.8.39"
   }
 }

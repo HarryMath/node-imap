@@ -99,7 +99,7 @@ export class MailParser {
     };
   }
 
-  static parseBodyPart(rawData: string, struct: MessageStructure, body: BodyPart): { result: string; parsed: boolean } {
+  static parseBodyPart(rawData: string, body: BodyPart, struct?: MessageStructure): { result: string; parsed: boolean } {
     const split = `Content-Type: ${body.contentType}; charset="${body.charset?.toUpperCase() || "UTF-8"}"`;
     const part = rawData.split(split)[1];
     if (!part) {
@@ -141,23 +141,23 @@ export class MailParser {
     //   return rawData;
     // }
     const potentialBody: BodyPart[] = [
-      struct?.body?.find(b => b.partId === "1"),
-      struct?.body?.find(b => b.partId !== "1" && b.contentType === "text/html"),
-      struct?.body?.find(b => b.partId !== "1" && b.contentType === "text/plain")
-    ].filter(b => !!b && b.partId.startsWith("1"));
+      struct?.body?.find(b => b.partId === "1") as BodyPart,
+      struct?.body?.find(b => b.partId !== "1" && b.contentType === "text/html") as BodyPart,
+      struct?.body?.find(b => b.partId !== "1" && b.contentType === "text/plain") as BodyPart
+    ].filter(b => !!b && b.partId?.startsWith("1"));
 
     if (!potentialBody?.length) {
       return rawData;
     }
 
-    let parsedBody: { result: string; parsed: boolean };
+    let parsedBody: { result?: string; parsed?: boolean } = {};
     for (const body of potentialBody) {
-      parsedBody = MailParser.parseBodyPart(rawData, struct, body);
-      if (parsedBody.parsed) {
+      parsedBody = MailParser.parseBodyPart(rawData, body, struct);
+      if (parsedBody.parsed && parsedBody.result) {
         return parsedBody.result;
       }
     }
-    return parsedBody?.result || rawData;
+    return parsedBody?.result ?? rawData;
   }
 
   private static parseInlineAttachment(rawData: string, attachmentId: string): string | undefined {
@@ -173,9 +173,9 @@ export class MailParser {
       return undefined;
     }
 
-    let contentType = MailParser.parseInlineHeader(headers, "Content-Type");
+    let contentType = MailParser.parseInlineHeader(headers, "Content-Type") as string;
     if (contentType.includes("name=")) {
-      contentType = contentType.split("name=")[0];
+      contentType = contentType.split("name=")?.[0]!;
     }
     const encoding = MailParser.parseInlineHeader(headers.toLowerCase(), "encoding");
     const prefix = "data:" + contentType + ";" + encoding;

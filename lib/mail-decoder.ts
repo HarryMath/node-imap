@@ -86,7 +86,7 @@ export abstract class MailDecoder {
       .trim();
   }
 
-  static decodeRawData(data: string, encoding: string, charset?: string): string {
+  static decodeRawData(data: string, encoding?: string, charset?: string): string {
     if (!encoding) {
       return data;
     }

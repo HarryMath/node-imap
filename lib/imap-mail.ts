@@ -21,6 +21,7 @@ process.env.NODE_TLS_REJECT_UNAUTHORIZED = 0;
 export interface ImapCredentials {
   user: string;
   password: string;
+  box: string;
 
   host?: string;
   port?: number;
@@ -53,22 +54,23 @@ interface AsyncOperation {
 }
 
 export class ImapMail {
-  private mail: string;
-  private readonly ALL_MAIL_BOX: string = '[Gmail]/All Mail';
   private readonly SEEN_FLAG: string = '\\Seen';
   private currentOperations: AsyncOperation[] = [];
   private _isConnected = true;
 
   get accountMail() {
-    return this.mail;
+    return this.account;
   }
 
   get isConnected(): boolean {
     return this._isConnected;
   }
 
-  private constructor(private readonly imap: Connection) {
-  };
+  private constructor(
+    private readonly imap: Connection,
+    private readonly conversationBox: string,
+    private readonly account: string,
+  ) {};
 
   async reconnect(): Promise<void> {
     try {
@@ -102,11 +104,11 @@ export class ImapMail {
         tls: credentials.tls ?? true,
         user: credentials.user,
         password: credentials.password,
-        socketTimeout: timeout
+        connTimeout: timeout,
+        authTimeout: timeout * 3
       });
 
-      const client = new ImapMail(imap);
-      client.mail = credentials.user;
+      const client = new ImapMail(imap, credentials.box, credentials.user);
       imap.connect();
 
       imap.once('ready', () => {
@@ -123,21 +125,17 @@ export class ImapMail {
     });
   }
 
-  async openAllMailBox() {
-    await this.openBox(this.ALL_MAIL_BOX);
-  }
-
   dispose() {
     this.imap.end();
   }
 
   async getUidNext(): Promise<number> {
-    const box = await this.openBox(this.ALL_MAIL_BOX);
+    const box = await this.openBox(this.conversationBox);
     return box.uidnext;
   }
 
   async setUnSeen(uid: number): Promise<void> {
-    await this.openBox(this.ALL_MAIL_BOX);
+    await this.openBox(this.conversationBox);
     return new Promise<void>((resolve, reject) => {
       this.imap.delFlags([uid], [this.SEEN_FLAG], (e) => {
         if (e) {
@@ -150,25 +148,13 @@ export class ImapMail {
   }
 
   async setSeen(uid: number): Promise<void> {
-    await this.openBox(this.ALL_MAIL_BOX);
+    await this.openBox(this.conversationBox);
     return new Promise<void>((resolve, reject) => {
       this.imap.setFlags([uid], [this.SEEN_FLAG], (e) => {
         if (e) {
           reject(e);
         } else {
           resolve();
-        }
-      });
-    });
-  }
-
-  async getBoxes(): Promise<MailBoxes> {
-    return new Promise<MailBoxes>((resolve, reject) => {
-      this.imap.getBoxes((err, boxes) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(boxes);
         }
       });
     });
@@ -401,6 +387,40 @@ export class ImapMail {
           reject(err);
         } else {
           resolve(box);
+        }
+      });
+    });
+  }
+
+  async getBoxes(): Promise<string[]> {
+    const boxes = await this.getNativeBoxes();
+    return this.getBoxDto("", boxes);
+  }
+
+  private getBoxDto(boxName: string, children?: MailBoxes): string[] {
+    const childrenSize = Object.keys(children ?? {}).length;
+    if (!childrenSize) {
+      return [boxName];
+    }
+
+    const result = [];
+    for (const c in children) {
+      if (c) {
+        const nextBoxName = [boxName, c].filter(p => p.length).join("/");
+        const boxes = this.getBoxDto(nextBoxName, children[c]?.children);
+        result.push(...boxes);
+      }
+    }
+    return result;
+  }
+
+  private async getNativeBoxes(): Promise<MailBoxes> {
+    return new Promise<MailBoxes>((resolve, reject) => {
+      this.imap.getBoxes((err, boxes) => {
+        if (err) {
+          reject(err);
+        } else {
+          resolve(boxes);
         }
       });
     });
