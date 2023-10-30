@@ -2,6 +2,7 @@ import { Attachment, BodyPart } from '../dto/email-message';
 import { NativeMessage } from './imap-mail';
 import { MailDecoder } from './mail-decoder';
 import { Replacer } from './replacer';
+import { ReplacerFunction } from '../dto/query-options';
 
 const Imap = require("imap");
 
@@ -37,9 +38,9 @@ export class MailParser {
     ) : mail;
   }
 
-  static parseMessageStructure(struct: any): MessageStructure {
+  static parseMessageStructure(struct: any): MessageStructure | undefined {
     if (!struct) {
-      return struct;
+      return undefined;
     }
     if (struct?.partID && struct?.type) {
       if (struct.type === "text" && !struct.disposition) {
@@ -82,24 +83,27 @@ export class MailParser {
       const attachments: Attachment[] = [];
       const body: BodyPart[] = [];
       childStructures.forEach(s => {
-        if (s.attachments?.length) {
+        if (s?.attachments?.length) {
           attachments.push(...s.attachments);
         }
-        if (s.body?.length) {
+        if (s?.body?.length) {
           body.push(...s.body);
         }
       });
-      return {
-        body,
-        attachments
-      };
+      return { body, attachments };
     }
     return {
       attachments: []
     };
   }
 
-  static parseBodyPart(rawData: string, body: BodyPart, struct?: MessageStructure): { result: string; parsed: boolean } {
+  static parseBodyPart(
+    messageUid: number,
+    rawData: string,
+    body: BodyPart,
+    struct?: MessageStructure,
+    replaceFunction?: ReplacerFunction
+  ): { result: string; parsed: boolean } {
     const split = `Content-Type: ${body.contentType}; charset="${body.charset?.toUpperCase() || "UTF-8"}"`;
     const part = rawData.split(split)[1];
     if (!part) {
@@ -124,7 +128,7 @@ export class MailParser {
       if (!inlineAttachment) {
         const attachmentPartId = struct?.attachments?.find(a => a.attachmentId === attachmentId)?.partId;
         if (attachmentPartId) {
-          inlineAttachment = "part:" + attachmentPartId;
+          inlineAttachment = replaceFunction?.(messageUid, attachmentPartId) ?? "part:" + attachmentPartId;
         }
       }
       return `src="${(inlineAttachment || attachmentId)}"`;
@@ -133,7 +137,7 @@ export class MailParser {
     return { result, parsed: true };
   }
 
-  static parseMessageBody(rawData: string, struct?: MessageStructure, uid?: number): string {
+  static parseMessageBody(messageUid: number, rawData: string, struct?: MessageStructure): string {
     // const bodyPartId = struct?.body?.length ? struct.body[0].partId : undefined;
     // if (bodyPartId === "1") {
     //   console.log("body part is 1: ", rawData);
@@ -152,7 +156,7 @@ export class MailParser {
 
     let parsedBody: { result?: string; parsed?: boolean } = {};
     for (const body of potentialBody) {
-      parsedBody = MailParser.parseBodyPart(rawData, body, struct);
+      parsedBody = MailParser.parseBodyPart(messageUid, rawData, body, struct);
       if (parsedBody.parsed && parsedBody.result) {
         return parsedBody.result;
       }

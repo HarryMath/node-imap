@@ -1,4 +1,4 @@
-import { LoadOptions } from './imap-mail';
+import { LoadOptions } from '../dto/query-options';
 
 export abstract class MailDecoder {
 

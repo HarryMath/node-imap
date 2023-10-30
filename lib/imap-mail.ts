@@ -1,9 +1,10 @@
 import * as Connection from 'imap';
 import { Box, ImapMessage, MailBoxes } from 'imap';
-import { BaseMailMessage, BodyPart, CharsetEncoding, PreparedMessage } from '../dto/email-message';
+import { BaseMailMessage, BodyPart, PreparedMessage } from '../dto/email-message';
 import { MailParser, MessageStructure } from './mail-parser';
 import { List } from '../dto/list';
 import { MailDecoder } from './mail-decoder';
+import { LoadOptions, MessageQueryOptions } from '../dto/query-options';
 
 const Imap = require('imap');
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
@@ -33,22 +34,6 @@ export interface NativeMessage extends BaseMailMessage {
   rawData?: string;
 }
 
-export interface MessageQuery {
-  headers?: ('FROM' | 'TO' | 'SUBJECT' | 'DATE')[];
-  body?: boolean;
-  attachments?: boolean;
-  skip?: number;
-  take?: number;
-
-  searchEmail?: string;
-  sinceUid?: number;
-}
-
-export interface LoadOptions extends CharsetEncoding {
-  loadStructure?: boolean;
-  rawData?: boolean;
-}
-
 interface AsyncOperation {
   reject: (err?: unknown) => void;
 }
@@ -69,8 +54,9 @@ export class ImapMail {
   private constructor(
     private readonly imap: Connection,
     private readonly conversationBox: string,
-    private readonly account: string,
-  ) {};
+    private readonly account: string
+  ) {
+  };
 
   async reconnect(): Promise<void> {
     try {
@@ -167,11 +153,11 @@ export class ImapMail {
     }
 
     if (uid) {
-      criteria.push(['UID', `${++uid}:*`]);
+      criteria.push(['UID', `${ ++uid }:*`]);
     }
 
     return new Promise<any>((resolve, reject) => {
-      this.currentOperations.push({reject});
+      this.currentOperations.push({ reject });
       this.imap.search(criteria, (err, ids) => {
         if (err) {
           reject(err);
@@ -188,7 +174,7 @@ export class ImapMail {
     }
 
     return new Promise<NodeJS.ReadableStream>((resolve, reject) => {
-      const queue = this.imap.fetch([uid], {bodies: [partId]});
+      const queue = this.imap.fetch([uid], { bodies: [partId] });
       queue.once('message', (m: any) => {
         m.on('body', (stream: any) => resolve(stream));
       });
@@ -199,7 +185,7 @@ export class ImapMail {
     });
   }
 
-  async getMails(query: MessageQuery): Promise<List<PreparedMessage>> {
+  async getMails(query: MessageQueryOptions): Promise<List<PreparedMessage>> {
     // console.time("Search ids");
     let ids: number[] = await this.searchEmails(query.searchEmail, query.sinceUid);
     const count = ids.length;
@@ -215,7 +201,7 @@ export class ImapMail {
         start = 0;
       }
       if (end <= 0) {
-        return {count, items: []};
+        return { count, items: [] };
       }
       // console.log("start: ", start);
       // console.log("end: ", end);
@@ -225,19 +211,23 @@ export class ImapMail {
     }
 
     if (!ids?.length) {
-      return {count, items: []};
+      return { count, items: [] };
     }
 
     const bodies: string[] = [];
     if (query.headers?.length) {
-      bodies.push(`HEADER.FIELDS (${query.headers.join(' ')})`);
+      bodies.push(`HEADER.FIELDS (${ query.headers.join(' ') })`);
     }
     if (query.body) {
       bodies.push('1');
     }
 
     // console.time("Structure and headers");
-    const messages = await this.readMessages(ids, bodies, {loadStructure: query.body || query.attachments});
+    const loadOptions: LoadOptions = {
+      loadStructure: query.body || query.attachments,
+      linkReplacerFunction: query.linkReplacerFunction
+    }
+    const messages = await this.readMessages(ids, bodies, loadOptions);
     // console.timeEnd("Structure and headers");
 
     const items = messages.map((message: NativeMessage) => {
@@ -261,10 +251,9 @@ export class ImapMail {
       }
 
       return result;
-    })
-      .reverse();
+    }).reverse();
 
-    return {count, items};
+    return { count, items };
   }
 
   /**
@@ -282,8 +271,8 @@ export class ImapMail {
     }
 
     return new Promise<NativeMessage[]>((resolve, reject) => {
-      this.currentOperations.push({reject});
-      const queue = this.imap.fetch(query, {bodies, struct: options?.loadStructure});
+      this.currentOperations.push({ reject });
+      const queue = this.imap.fetch(query, { bodies, struct: options?.loadStructure });
       const messages: OrderedMessage[] = [];
 
       queue.on('message', async (message, order) => {
@@ -325,7 +314,7 @@ export class ImapMail {
         seen = arg.flags?.includes(this.SEEN_FLAG) || false;
       });
       m.once('end', async () => {
-        const dataLoadOptions = {...options};
+        const dataLoadOptions = { ...options };
         let structBody: BodyPart;
         if (struct?.body?.length) {
           structBody =
@@ -363,7 +352,7 @@ export class ImapMail {
         if (rawData) {
           const bodyStruct = struct?.body?.find(b => !!b.contentType);
           // console.log("bodyStruct: ", bodyStruct);
-          result.rawData = MailParser.parseMessageBody(rawData, struct, uid);
+          result.rawData = MailParser.parseMessageBody(uid as number, rawData, struct);
           result.encoding = dataLoadOptions.encoding || bodyStruct?.encoding;
           result.contentType = bodyStruct?.contentType;
           result.bodyPartId = bodyStruct?.partId;
@@ -394,7 +383,7 @@ export class ImapMail {
 
   async getBoxes(): Promise<string[]> {
     const boxes = await this.getNativeBoxes();
-    return this.getBoxDto("", boxes);
+    return this.getBoxDto('', boxes);
   }
 
   private getBoxDto(boxName: string, children?: MailBoxes): string[] {
@@ -406,7 +395,7 @@ export class ImapMail {
     const result = [];
     for (const c in children) {
       if (c) {
-        const nextBoxName = [boxName, c].filter(p => p.length).join("/");
+        const nextBoxName = [boxName, c].filter(p => p.length).join('/');
         const boxes = this.getBoxDto(nextBoxName, children[c]?.children);
         result.push(...boxes);
       }
