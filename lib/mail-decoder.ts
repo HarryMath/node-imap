@@ -25,7 +25,10 @@ export abstract class MailDecoder {
 
   static decodeQuotedPrintable(raw: string, charset = "utf-8") {
     const dc = new TextDecoder(charset.toLowerCase());
-    return raw.replace(/[\t\x20]$/gm, "").replace(/=(?:\r\n?|\n)/g, "")
+    return raw
+      .replace(/[\t\x20]$/gm, "")
+      // .replace(/=(?:\r\n?|\n)/g, "")
+      .replace(/=3D"/g, "")
       .replace(/((?:=[a-fA-F0-9]{2})+)/g, (m: any) => {
         const cd = m.substring(1).split("="), uArr = new Uint8Array(cd.length);
         for (let i = 0; i < cd.length; i++) {

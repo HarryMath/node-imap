@@ -104,8 +104,11 @@ export class MailParser {
     struct?: MessageStructure,
     replaceFunction?: ReplacerFunction
   ): { result: string; parsed: boolean } {
-    const split = `Content-Type: ${body.contentType}; charset="${body.charset?.toUpperCase() || "UTF-8"}"`;
-    const part = rawData.split(split)[1];
+    const regexp = /Content-Type: (.*?); charset=".*?"/gi;
+    const parts = Replacer.splitTextIntoParts(rawData, regexp);
+
+    const part = parts["text/html"] ?? parts["text/plain"];
+
     if (!part) {
       // console.warn("no required content-type in body: " + split);
       // console.warn("rawData is " + rawData);

@@ -301,18 +301,19 @@ export class ImapMail {
       let uid: number | undefined;
       let seen = false;
       let struct: MessageStructure | undefined;
+
       m.on('body', (stream, info) => {
         const isBody = options?.rawData || info.which === '1';
         const chunks = isBody ? dataChunks : headerChunks;
         chunks.push(stream);
       });
+
       m.once('attributes', (arg) => {
         uid = arg.uid as number;
-        if (options?.loadStructure) {
-          struct = MailParser.parseMessageStructure(arg.struct);
-        }
-        seen = arg.flags?.includes(this.SEEN_FLAG) || false;
+        struct = MailParser.parseMessageStructure(arg.struct);
+        seen = arg.flags?.includes(this.SEEN_FLAG) ?? false;
       });
+
       m.once('end', async () => {
         const dataLoadOptions = { ...options };
         let structBody: BodyPart;
@@ -331,8 +332,11 @@ export class ImapMail {
           dataLoadOptions.encoding = structBody?.encoding;
         }
 
-        const headersPayload = await Promise.all(headerChunks.map(s => MailDecoder.decodeStream(s, options)));
-        const dataPayload = await Promise.all(dataChunks.map(s => MailDecoder.decodeStream(s, dataLoadOptions)));
+        const [headersPayload, dataPayload] = await Promise.all([
+          Promise.all(headerChunks.map(s => MailDecoder.decodeStream(s, options))),
+          Promise.all(dataChunks.map(s => MailDecoder.decodeStream(s, options)))
+        ]);
+
         if (dataPayload.length > 1 || headersPayload.length > 1) {
           console.warn('WARNING OF BODY OR PAYLOAD BIGGER THAN 1');
           console.warn('body', dataPayload);

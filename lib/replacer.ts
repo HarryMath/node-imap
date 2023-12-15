@@ -11,5 +11,14 @@ export const Replacer = {
         replaceRule(value) + part.substring(value.length + 1);
     });
     return firstPart + restParts.join("");
-  }
+  },
+
+  splitTextIntoParts: (rawData: string, regexp: RegExp): Record<string, string> => {
+    return rawData.split(regexp).reduce((obj, current, index, array) => {
+      if (index % 1 === 0) {
+        obj[current.toLowerCase()] = array[index + 1];
+      }
+      return obj;
+    }, {});
+  },
 };
