@@ -1,4 +1,4 @@
-import { LoadOptions } from '../dto/query-options';
+import { LoadOptions } from "../types/query";
 
 export abstract class MailDecoder {
 
@@ -27,8 +27,7 @@ export abstract class MailDecoder {
     const dc = new TextDecoder(charset.toLowerCase());
     return raw
       .replace(/[\t\x20]$/gm, "")
-      // .replace(/=(?:\r\n?|\n)/g, "")
-      .replace(/=3D"/g, "")
+      .replace(/=(?:\r\n?|\n)/g, "")
       .replace(/((?:=[a-fA-F0-9]{2})+)/g, (m: any) => {
         const cd = m.substring(1).split("="), uArr = new Uint8Array(cd.length);
         for (let i = 0; i < cd.length; i++) {
@@ -39,20 +38,28 @@ export abstract class MailDecoder {
   }
 
   static async decodeStream(stream: NodeJS.ReadableStream, options?: LoadOptions): Promise<string> {
+    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
+    // @ts-ignore
+    // handle empty stream
+    if (!stream._readableState.length || !stream.readable) {
+      return "";
+    }
+
     const buffer: Buffer[] = [];
-    return new Promise<string>((resolve) => {
+    return new Promise<string>((resolve, reject) => {
       stream.on("data", (chunk: any) => {
         buffer.push(chunk);
       });
+
       stream.once("end", () => {
-        const charset = MailDecoder.resolveCharset(options?.charset);
-        let data = Buffer.concat(buffer).toString(charset);
-
-        if (typeof options?.encoding === "string") {
-          data = MailDecoder.decodeRawData(data, options.encoding, options?.charset);
+        try {
+          const charset = MailDecoder.resolveCharset(options?.charset);
+          let data = Buffer.concat(buffer).toString(charset);
+          data = MailDecoder.decodeRawData(data, options?.encoding, options?.charset)
+          resolve(data);
+        } catch (err) {
+          reject(err);
         }
-
-        resolve(data);
       });
     });
   }
@@ -64,15 +71,21 @@ export abstract class MailDecoder {
 
     const normalized = charset
       .toLowerCase()
-      .replace("-", "")
+      .replaceAll("-", "")
       .trim();
 
     switch (normalized) {
       case "utf8":
-        return "utf8" as BufferEncoding;
+        return "utf8";
+
+      // case "iso88591":
+      //   return "iso-8859-1" as BufferEncoding;
+
+      case "usascii":
+        return "ucs2";
 
       default:
-        console.warn("Unknown charset: ", charset);
+        console.warn("Unknown charset: ", charset, normalized);
         return "utf8" as BufferEncoding;
     }
   }
@@ -99,20 +112,21 @@ export abstract class MailDecoder {
       case "base64":
         if (!data.includes("text/html") && !data.includes("text/plain")) {
           const decoded = Buffer.from(data, "base64").toString();
-          const encoded = new Buffer(decoded).toString("base64");
+          const encoded = Buffer.from(decoded).toString("base64");
           return MailDecoder.isBase64Equal(encoded, data) ? decoded : data;
         } else {
-          console.warn("WRONG INPUT FOR base64 encoding: ");
-          console.log(data);
+          console.error("WRONG INPUT FOR base64 encoding: ");
+          console.warn(data.substring(0, 300));
         }
         break;
       case "quotedprintable":
       case "qp":
         return MailDecoder.decodeQuotedPrintable(data, charset);
+      case "8bit":
       case "7bit":
         break;
       default:
-        console.warn("UNKNOWN encoding: ", encoding);
+        console.warn("\nUNKNOWN encoding: ", encoding, "\n", data.substring(0, 300));
         break;
     }
     return data;

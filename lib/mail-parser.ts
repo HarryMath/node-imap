@@ -1,28 +1,16 @@
-import { Attachment, BodyPart } from '../dto/email-message';
-import { NativeMessage } from './imap-mail';
-import { MailDecoder } from './mail-decoder';
-import { Replacer } from './replacer';
-import { ReplacerFunction } from '../dto/query-options';
-
+import { Attachment, BodyPart, MessageStructure, NativeMessage } from "../types/message";
+import { MailDecoder } from "./mail-decoder";
+import { LoadOptions } from "../types/query";
+import { Replacer } from "./replacer";
+import { MimeType } from "../types/util";
 const Imap = require("imap");
-
-declare global {
-  interface Array<T> {
-    at(index: number): T | undefined;
-  }
-}
-
-export interface MessageStructure {
-  attachments: Attachment[];
-  body?: BodyPart[];
-}
 
 export class MailParser {
 
-  static parseHeaders(data?: string): Partial<NativeMessage> {
+  static parseHeaders(accountMail: string, data?: string): Partial<NativeMessage> {
     const headers = data?.length ? this.flattenObject<NativeMessage>(Imap.parseHeader(data)) : {};
     if (headers.from) {
-      headers.from = MailParser.normalizeAddress(headers.from);
+      headers.from = MailParser.normalizeAddress(headers.from, accountMail);
     }
     if (headers.to) {
       headers.to = MailParser.normalizeAddress(headers.to);
@@ -30,19 +18,22 @@ export class MailParser {
     return headers;
   }
 
+  private static normalizeAddress(header: string, accountMail?: string): string {
+    const address = header.includes("<") ? header.substring(
+      header.indexOf("<") + 1,
+      header.lastIndexOf(">")
+    ) : header;
 
-  private static normalizeAddress(mail: string): string {
-    return mail.includes("<") ? mail.substring(
-      mail.indexOf("<") + 1,
-      mail.lastIndexOf(">")
-    ) : mail;
+    // specify account mail in "from" field for handling strange outlook behavior
+    return address.includes("=") || address.length > 128
+      ? accountMail ?? address
+      : address;
   }
 
-  static parseMessageStructure(struct: any): MessageStructure | undefined {
-    if (!struct) {
-      return undefined;
-    }
-    if (struct?.partID && struct?.type) {
+  static parseMessageStructure(struct: any): MessageStructure | null {
+    if (!struct) { return null; }
+
+    if (struct.partID && struct.type) {
       if (struct.type === "text" && !struct.disposition) {
         return {
           body: [{
@@ -64,6 +55,7 @@ export class MailParser {
             .replace(">", "")
             .trim();
         }
+
         return {
           attachments: [{
             fileName,
@@ -78,7 +70,9 @@ export class MailParser {
           }]
         };
       }
-    } else if (Array.isArray(struct)) {
+    }
+
+    else if (Array.isArray(struct)) {
       const childStructures = struct.map(s => MailParser.parseMessageStructure(s));
       const attachments: Attachment[] = [];
       const body: BodyPart[] = [];
@@ -92,79 +86,82 @@ export class MailParser {
       });
       return { body, attachments };
     }
-    return {
-      attachments: []
-    };
+
+    return { attachments: [] };
   }
 
   static parseBodyPart(
     messageUid: number,
     rawData: string,
-    body: BodyPart,
-    struct?: MessageStructure,
-    replaceFunction?: ReplacerFunction
-  ): { result: string; parsed: boolean } {
+    struct?: MessageStructure | null,
+    options?: LoadOptions
+  ): { body: string; contentType?: MimeType | string } {
     const regexp = /Content-Type: (.*?); charset=".*?"/gi;
     const parts = Replacer.splitTextIntoParts(rawData, regexp);
 
-    const part = parts["text/html"] ?? parts["text/plain"];
+    const extractPart = (contentType: string) => {
+      const body = parts[contentType];
+      if (body) {
+        return { body, contentType };
+      }
+      return null;
+    };
+
+    const part = extractPart(MimeType.html) ?? extractPart(MimeType.txt);
 
     if (!part) {
-      // console.warn("no required content-type in body: " + split);
-      // console.warn("rawData is " + rawData);
-      // console.warn("body ", body);
-      return  { result: MailDecoder.decodeRawData(rawData, body.encoding, body.charset), parsed: false };
-    }
-    let result = part.split("--")[0];
-    if (!result) {
-      return { result: rawData, parsed: false };
-    }
-    if (result.includes("Content-Transfer-Encoding:")) {
-      // const encoding = finalBody.split("Content-Transfer-Encoding:")[1]?.split("\n")[0]?.trim();
-      const encoding = MailParser.parseInlineHeader(result, "Content-Transfer-Encoding");
-      const data = result.split(encoding || "no-encoding")[1]?.trim();
-      result = MailDecoder.decodeRawData(data || result, encoding);
+      return {
+        body: MailDecoder.decodeRawData(rawData, options?.encoding, options?.charset),
+      };
     }
 
-    result = Replacer.replaceAllBetween(result, ['src="cid:', '"'], attachmentId => {
+    let body = part.body
+      .split("--")
+      .filter(Boolean)
+      .slice(0, -1)
+      .join("--")
+      .trim();
+
+    if (!body) {
+      return {
+        body: rawData
+      };
+    }
+
+    if (body.includes("Content-Transfer-Encoding:")) {
+      // const encoding = finalBody.split("Content-Transfer-Encoding:")[1]?.split("\n")[0]?.trim();
+      const encoding = MailParser.parseInlineHeader(body, "Content-Transfer-Encoding");
+      const data = body.split(encoding || "no-encoding")[1]?.trim();
+      body = MailDecoder.decodeRawData(data || body, encoding);
+    }
+
+    body = Replacer.replace(body, /src="cid:(.*?)"/gi, src => {
+      const attachmentId = src.split("cid:")[1]?.replace(/"/g, "");
       let inlineAttachment = MailParser.parseInlineAttachment(rawData, attachmentId);
       if (!inlineAttachment) {
-        const attachmentPartId = struct?.attachments?.find(a => a.attachmentId === attachmentId)?.partId;
-        if (attachmentPartId) {
-          inlineAttachment = replaceFunction?.(messageUid, attachmentPartId) ?? "part:" + attachmentPartId;
+        const attachment = struct?.attachments?.find(a => a.attachmentId === attachmentId);
+        if (attachment?.partId) {
+          inlineAttachment = options?.inlineAttachmentReplacer?.(messageUid, attachment, options.account, options.box) ?? "part:" + attachment.partId;
         }
       }
       return `src="${(inlineAttachment || attachmentId)}"`;
     });
 
-    return { result, parsed: true };
+    part.body = body;
+    return part;
   }
 
-  static parseMessageBody(messageUid: number, rawData: string, struct?: MessageStructure): string {
-    // const bodyPartId = struct?.body?.length ? struct.body[0].partId : undefined;
-    // if (bodyPartId === "1") {
-    //   console.log("body part is 1: ", rawData);
-    //   console.log("body part is 1: ", struct);
-    //   return rawData;
-    // }
-    const potentialBody: BodyPart[] = [
-      struct?.body?.find(b => b.partId === "1") as BodyPart,
-      struct?.body?.find(b => b.partId !== "1" && b.contentType === "text/html") as BodyPart,
-      struct?.body?.find(b => b.partId !== "1" && b.contentType === "text/plain") as BodyPart
-    ].filter(b => !!b && b.partId?.startsWith("1"));
-
-    if (!potentialBody?.length) {
-      return rawData;
+  static getBodyStruct(struct?: MessageStructure | null): BodyPart | null {
+    if (!struct?.body?.length) {
+      return null;
     }
 
-    let parsedBody: { result?: string; parsed?: boolean } = {};
-    for (const body of potentialBody) {
-      parsedBody = MailParser.parseBodyPart(messageUid, rawData, body, struct);
-      if (parsedBody.parsed && parsedBody.result) {
-        return parsedBody.result;
-      }
-    }
-    return parsedBody?.result ?? rawData;
+    const bodies = struct.body
+      .filter(b => b.partId?.startsWith("1") && b.contentType.includes("text"));
+
+    return bodies.find(b => b.contentType = MimeType.html) ||
+      bodies.find(b => b.contentType = MimeType.txt) ||
+      bodies[0] || null;
   }
 
   private static parseInlineAttachment(rawData: string, attachmentId: string): string | undefined {
@@ -180,10 +177,11 @@ export class MailParser {
       return undefined;
     }
 
-    let contentType = MailParser.parseInlineHeader(headers, "Content-Type") as string;
-    if (contentType.includes("name=")) {
-      contentType = contentType.split("name=")?.[0]!;
+    let contentType = MailParser.parseInlineHeader(headers, "Content-Type");
+    if (contentType?.includes("name=")) {
+      contentType = contentType.split("name=")[0];
     }
+
     const encoding = MailParser.parseInlineHeader(headers.toLowerCase(), "encoding");
     const prefix = "data:" + contentType + ";" + encoding;
     return prefix + ", " + body.trim();

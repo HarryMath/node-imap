@@ -1,47 +1,38 @@
-import * as Connection from 'imap';
-import { Box, ImapMessage, MailBoxes } from 'imap';
-import { BaseMailMessage, BodyPart, PreparedMessage } from '../dto/email-message';
-import { MailParser, MessageStructure } from './mail-parser';
-import { List } from '../dto/list';
-import { MailDecoder } from './mail-decoder';
-import { LoadOptions, MessageQueryOptions } from '../dto/query-options';
+import * as Connection from "imap";
+import { Box, ImapMessage, MailBoxes } from "imap";
+import { DateUtil, MailHeaders, MimeType } from "../types/util";
+import { ImapConfig } from "../types/credentials";
+import { LoadOptions, MessageQuery, SearchOptions } from "../types/query";
+import { SearchBuilder } from "./search-builder";
+import { MessageStructure, NativeMessage, PreparedMessage } from "../types/message";
+import { List } from "../types/list";
+import { MailParser } from "./mail-parser";
+import { MailDecoder } from "./mail-decoder";
 
-const Imap = require('imap');
+const Imap = require("imap");
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = 0;
-
-/**
- * user and password are required;
- * default configuration:
- * @example
- * host: "imap.gmail.com"
- * port: 993,
- * tls: true
- */
-export interface ImapCredentials {
-  user: string;
-  password: string;
-  box: string;
-
-  host?: string;
-  port?: number;
-  tls?: boolean;
-}
-
-export interface NativeMessage extends BaseMailMessage {
-  struct: MessageStructure;
-  rawData?: string;
-}
 
 interface AsyncOperation {
   reject: (err?: unknown) => void;
 }
 
 export class ImapMail {
-  private readonly SEEN_FLAG: string = '\\Seen';
+  private static readonly THREAD_ID_FLAG = "x-gm-thrid"; // X-GM-THRID
+  private static readonly SEEN_FLAG = "\\Seen";
+  static readonly SENT_BOX = "Sent";
+
+  private get BODY_PART_INDEX() {
+    return this.isGmail ? "1" : "TEXT";
+  }
+
+  static readonly ALL_HEADERS: MailHeaders[] = ["FROM", "TO", "DATE", "SUBJECT", "MESSAGE-ID"];
+
   private currentOperations: AsyncOperation[] = [];
   private _isConnected = true;
+  private openedBox: Box | undefined;
+  isGmail = false;
 
   get accountMail() {
     return this.account;
@@ -53,12 +44,33 @@ export class ImapMail {
 
   private constructor(
     private readonly imap: Connection,
-    private readonly conversationBox: string,
-    private readonly account: string
-  ) {
-  };
+    public readonly conversationBox: string,
+    private readonly account: string,
+  ) {};
+
+  private async openBox(boxName: string): Promise<Box> {
+    if (this.openedBox?.name === boxName) {
+      // console.log(`Box ${boxName} already opened`);
+      return this.openedBox;
+    } else {
+      // console.log(`Opening box ${boxName}...`);
+    }
+
+    return new Promise((resolve, reject) => {
+      this.imap.openBox(boxName, (err, box) => {
+        if (err) {
+          reject(err);
+        } else {
+          this.openedBox = box;
+          resolve(box);
+        }
+      });
+    });
+  }
 
   async reconnect(): Promise<void> {
+    this.openedBox = undefined;
+
     try {
       this.imap.end();
     } catch (ignore) {
@@ -67,63 +79,59 @@ export class ImapMail {
     return new Promise((resolve, reject) => {
       this.imap.connect();
 
-      this.imap.once('ready', () => {
+      this.imap.once("ready", () => {
         this._isConnected = true;
         resolve();
       });
-      this.imap.once('error', (err: Error) => {
-        this.rejectAllOperations(err);
+
+      this.imap.once("error", (err: Error) => {
+        this.rejectAllOperations("Error " + (err.message || err.name), err);
         reject(err);
       });
-      this.imap.once('end', () => {
-        this.rejectAllOperations();
+
+      this.imap.once("end", () => {
+        this.rejectAllOperations("Client closed", null);
         reject(null);
       });
     });
   }
 
-  static async init(credentials: ImapCredentials, timeout = 10000): Promise<ImapMail> {
-    return new Promise((resolve, reject) => {
+  static async init(credentials: ImapConfig, isGmail?: boolean, timeout = 2000): Promise<ImapMail> {
+    return new Promise(async (resolve, reject) => {
+      const { user, password, conversationBox } = credentials;
+
       const imap = new Imap({
-        host: credentials.host ?? 'imap.gmail.com',
-        port: credentials.port ?? 993,
+        ...credentials,
+        user,
+        password,
         tls: credentials.tls ?? true,
-        user: credentials.user,
-        password: credentials.password,
-        connTimeout: timeout,
-        authTimeout: timeout * 3
+        socketTimeout: timeout,
+        authTimeout: timeout * 2
       });
 
-      const client = new ImapMail(imap, credentials.box, credentials.user);
-      imap.connect();
+      const client = new ImapMail(imap, conversationBox, user);
+      client.isGmail = !!isGmail || user.endsWith("@gmail.com");
 
-      imap.once('ready', () => {
-        resolve(client);
-      });
-      imap.once('error', (err: Error) => {
-        client.rejectAllOperations(err);
-        reject(err);
-      });
-      imap.once('end', () => {
-        client.rejectAllOperations();
-        reject(null);
-      });
+      client.reconnect()
+        .then(() => resolve(client))
+        .catch(reject);
     });
   }
 
   dispose() {
+    this.openedBox = undefined;
     this.imap.end();
   }
 
-  async getUidNext(): Promise<number> {
-    const box = await this.openBox(this.conversationBox);
+  async getUidNext(boxName?: string): Promise<number> {
+    const box = await this.openBox(boxName ?? this.conversationBox);
     return box.uidnext;
   }
 
   async setUnSeen(uid: number): Promise<void> {
     await this.openBox(this.conversationBox);
     return new Promise<void>((resolve, reject) => {
-      this.imap.delFlags([uid], [this.SEEN_FLAG], (e) => {
+      this.imap.delFlags([uid], [ImapMail.SEEN_FLAG], (e) => {
         if (e) {
           reject(e);
         } else {
@@ -136,7 +144,7 @@ export class ImapMail {
   async setSeen(uid: number): Promise<void> {
     await this.openBox(this.conversationBox);
     return new Promise<void>((resolve, reject) => {
-      this.imap.setFlags([uid], [this.SEEN_FLAG], (e) => {
+      this.imap.setFlags([uid], [ImapMail.SEEN_FLAG], (e) => {
         if (e) {
           reject(e);
         } else {
@@ -146,248 +154,9 @@ export class ImapMail {
     });
   }
 
-  async searchEmails(from?: string, uid = 0): Promise<any> {
-    const criteria: any[] = [];
-    if (from) {
-      criteria.push(['OR', ['TO', from], ['FROM', from]]);
-    }
-
-    if (uid) {
-      criteria.push(['UID', `${ ++uid }:*`]);
-    }
-
-    return new Promise<any>((resolve, reject) => {
-      this.currentOperations.push({ reject });
-      this.imap.search(criteria, (err, ids) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(ids.filter(i => i >= uid));
-        }
-      });
-    });
-  }
-
-  async getAttachment(uid: number, partId: string): Promise<NodeJS.ReadableStream> {
-    if (!uid || !partId) {
-      throw new Error('uid or/and partId are required');
-    }
-
-    return new Promise<NodeJS.ReadableStream>((resolve, reject) => {
-      const queue = this.imap.fetch([uid], { bodies: [partId] });
-      queue.once('message', (m: any) => {
-        m.on('body', (stream: any) => resolve(stream));
-      });
-      queue.once('error', reject);
-      queue.once('end', async () => {
-        this.dispose();
-      });
-    });
-  }
-
-  async getMails(query: MessageQueryOptions): Promise<List<PreparedMessage>> {
-    // console.time("Search ids");
-    let ids: number[] = await this.searchEmails(query.searchEmail, query.sinceUid);
-    const count = ids.length;
-    // console.timeEnd("Search ids");
-
-    // ids.forEach(i => console.log("id: " + i));
-
-    if (query.searchEmail && query.take) {
-      // console.time("pagination");
-      const end = count - (query.skip || 0);
-      let start = end - query.take;
-      if (start < 0) {
-        start = 0;
-      }
-      if (end <= 0) {
-        return { count, items: [] };
-      }
-      // console.log("start: ", start);
-      // console.log("end: ", end);
-      ids = ids.slice(start, end);
-      // console.log("ids: ", ids);
-      // console.timeEnd("pagination");
-    }
-
-    if (!ids?.length) {
-      return { count, items: [] };
-    }
-
-    const bodies: string[] = [];
-    if (query.headers?.length) {
-      bodies.push(`HEADER.FIELDS (${ query.headers.join(' ') })`);
-    }
-    if (query.body) {
-      bodies.push('1');
-    }
-
-    // console.time("Structure and headers");
-    const loadOptions: LoadOptions = {
-      loadStructure: query.body || query.attachments,
-      linkReplacerFunction: query.linkReplacerFunction
-    }
-    const messages = await this.readMessages(ids, bodies, loadOptions);
-    // console.timeEnd("Structure and headers");
-
-    const items = messages.map((message: NativeMessage) => {
-      const result = {
-        uid: message.uid,
-        from: message.from,
-        to: message.to,
-        date: message.date,
-        subject: message.subject,
-        seen: message.seen,
-        // encoding: message.encoding,
-        // bodyPartId: message.bodyPartId,
-        contentType: message.contentType
-      } as PreparedMessage;
-
-      if (query.attachments) {
-        result.attachments = message.struct?.attachments || [];
-      }
-      if (query.body) {
-        result.body = message.rawData?.trim() || '';
-      }
-
-      return result;
-    }).reverse();
-
-    return { count, items };
-  }
-
-  /**
-   * Method reads the messages by query;
-   * @param query -- list of message ids or criteria
-   * @param bodies -- parts of message that need to be queried
-   * @param options -- has to parameters:
-   *  - loadStructure -- set true if structure is needed
-   *  - rawData -- set true if you do not need to parse headers, just return string of bytes
-   */
-  private async readMessages(query: any, bodies: string[], options?: LoadOptions): Promise<NativeMessage[]> {
-    interface OrderedMessage {
-      message: Promise<NativeMessage>;
-      order: number;
-    }
-
-    return new Promise<NativeMessage[]>((resolve, reject) => {
-      this.currentOperations.push({ reject });
-      const queue = this.imap.fetch(query, { bodies, struct: options?.loadStructure });
-      const messages: OrderedMessage[] = [];
-
-      queue.on('message', async (message, order) => {
-        messages.push({
-          message: this.readMessage(message, options),
-          order
-        });
-      });
-      queue.once('error', reject);
-      queue.once('end', async () => {
-        const result = await Promise.all(
-          messages
-            .sort((m1, m2) => m1.order - m2.order)
-            .map(m => m.message)
-        );
-
-        resolve(result);
-      });
-    });
-  }
-
-  private async readMessage(m: ImapMessage, options?: LoadOptions): Promise<NativeMessage> {
-    return new Promise<NativeMessage>(resolve => {
-      const headerChunks: NodeJS.ReadableStream[] = [];
-      const dataChunks: NodeJS.ReadableStream[] = [];
-      let uid: number | undefined;
-      let seen = false;
-      let struct: MessageStructure | undefined;
-
-      m.on('body', (stream, info) => {
-        const isBody = options?.rawData || info.which === '1';
-        const chunks = isBody ? dataChunks : headerChunks;
-        chunks.push(stream);
-      });
-
-      m.once('attributes', (arg) => {
-        uid = arg.uid as number;
-        struct = MailParser.parseMessageStructure(arg.struct);
-        seen = arg.flags?.includes(this.SEEN_FLAG) ?? false;
-      });
-
-      m.once('end', async () => {
-        const dataLoadOptions = { ...options };
-        let structBody: BodyPart;
-        if (struct?.body?.length) {
-          structBody =
-            struct.body.find(b => b.contentType === 'text/html') ||
-            struct.body.find(b => b.contentType = 'text/plain') ||
-            struct.body.find(b => !!b.charset) ||
-            struct.body[0];
-
-          if (!structBody.contentType?.includes('text')) {
-            console.warn('WARNING NO GOOD STRUCT: ');
-            console.warn(struct);
-          }
-          dataLoadOptions.charset = structBody?.charset || dataLoadOptions.charset;
-          dataLoadOptions.encoding = structBody?.encoding;
-        }
-
-        const [headersPayload, dataPayload] = await Promise.all([
-          Promise.all(headerChunks.map(s => MailDecoder.decodeStream(s, options))),
-          Promise.all(dataChunks.map(s => MailDecoder.decodeStream(s, options)))
-        ]);
-
-        if (dataPayload.length > 1 || headersPayload.length > 1) {
-          console.warn('WARNING OF BODY OR PAYLOAD BIGGER THAN 1');
-          console.warn('body', dataPayload);
-          console.warn('payload', headersPayload);
-        }
-        const [headersString] = headersPayload;
-        const [rawData] = dataPayload;
-
-        const headers = MailParser.parseHeaders(headersString);
-        const result = {
-          ...headers,
-          struct,
-          uid,
-          seen
-        } as NativeMessage;
-
-        if (rawData) {
-          const bodyStruct = struct?.body?.find(b => !!b.contentType);
-          // console.log("bodyStruct: ", bodyStruct);
-          result.rawData = MailParser.parseMessageBody(uid as number, rawData, struct);
-          result.encoding = dataLoadOptions.encoding || bodyStruct?.encoding;
-          result.contentType = bodyStruct?.contentType;
-          result.bodyPartId = bodyStruct?.partId;
-        }
-
-        // if (struct.body?.length > 1) {
-        //   console.warn("\n\nbody length is more than 1 is structure: ");
-        //   console.log("struct: ", struct);
-        //   console.log("encoded: ", dataPayload);
-        //   console.log("decoded: ", result.rawData);
-        // }
-        resolve(result);
-      });
-    });
-  }
-
-  private async openBox(boxName: string): Promise<Box> {
-    return new Promise((resolve, reject) => {
-      this.imap.openBox(boxName, (err, box) => {
-        if (err) {
-          reject(err);
-        } else {
-          resolve(box);
-        }
-      });
-    });
-  }
-
   async getBoxes(): Promise<string[]> {
     const boxes = await this.getNativeBoxes();
-    return this.getBoxDto('', boxes);
+    return this.getBoxDto("", boxes);
   }
 
   private getBoxDto(boxName: string, children?: MailBoxes): string[] {
@@ -399,7 +168,7 @@ export class ImapMail {
     const result = [];
     for (const c in children) {
       if (c) {
-        const nextBoxName = [boxName, c].filter(p => p.length).join('/');
+        const nextBoxName = [boxName, c].filter(p => p.length).join("/");
         const boxes = this.getBoxDto(nextBoxName, children[c]?.children);
         result.push(...boxes);
       }
@@ -419,7 +188,334 @@ export class ImapMail {
     });
   }
 
-  private rejectAllOperations(err?: unknown): void {
+  private async searchEmails(options?: SearchOptions): Promise<number[]> {
+    const criteria: any[] = [];
+    let searchEmail = options?.searchEmail || [];
+    let uid = options?.sinceUid || 0;
+
+    if (typeof searchEmail === "string") {
+      searchEmail = [searchEmail];
+    }
+
+    if (searchEmail?.length) {
+      const opponentCriteria = SearchBuilder.buildOpponentCriteria(searchEmail);
+      criteria.push(opponentCriteria);
+    }
+
+    if (options?.sinceUid) {
+      criteria.push(["UID", `${ ++uid }:*`]);
+    }
+
+    if (options?.sentBefore) {
+      const date = DateUtil.withOffset(options.sentBefore, 1);
+      const dateCriteria = DateUtil.dateOnly(date);
+      criteria.push(["SENTBEFORE", dateCriteria]);
+    }
+
+    if (options?.sentAfter) {
+      const date = DateUtil.withOffset(options.sentAfter, -1);
+      const dateCriteria = DateUtil.dateOnly(date);
+      criteria.push(["SENTSINCE", dateCriteria]);
+    }
+
+    if (options?.threadId) {
+      criteria.push([ImapMail.THREAD_ID_FLAG.toUpperCase(), String(options.threadId)]);
+    }
+
+    return new Promise<any>((resolve, reject) => {
+      this.currentOperations.push({ reject });
+      this.imap.search(criteria, (err, ids) => {
+        if (err) {
+          reject(err);
+        } else {
+          // console.log("results: ", ids);
+          resolve(ids.filter(i => i >= uid));
+        }
+      });
+    });
+  }
+
+  async getAttachment(uid: number, partId: string, box?: string): Promise<NodeJS.ReadableStream> {
+    // if (!uid || !partId) {
+    //   throw new BadRequestException("uid or/and partId are required");
+    // }
+
+    await this.openBox(box || this.conversationBox);
+    return new Promise<NodeJS.ReadableStream>((resolve, reject) => {
+      const queue = this.imap.fetch([uid], { bodies: [partId] });
+      queue.once("message", (m: any) => {
+        m.on("body", (stream: any) => resolve(stream));
+      });
+      queue.once("error", reject);
+    });
+  }
+
+  async getLatestEmail(searchEmail: string, query: MessageQuery): Promise<PreparedMessage | null> {
+    await this.openBox(this.conversationBox);
+    let latest = await this.getLatestInCurrentBox(searchEmail, query);
+
+    if (!this.isGmail) {
+      await this.openBox(ImapMail.SENT_BOX);
+      const latestSent = await this.getLatestInCurrentBox(searchEmail, query);
+      latest ??= latestSent;
+
+      if (latestSent && latestSent.date.getTime() > latest!.date.getTime()) {
+        latest = latestSent;
+      }
+    }
+
+    return latest;
+  }
+
+  private async getLatestInCurrentBox(searchEmail: string, query: MessageQuery): Promise<PreparedMessage | null> {
+    const now = new Date();
+    const dateGap = 14;
+    const sentAfter = DateUtil.withOffset(now, -dateGap);
+
+    const ids = await this.searchEmails({ searchEmail, sentAfter });
+    const maxId = Math.max(...ids, 0);
+
+    if (!maxId) {
+      return null;
+    }
+
+    return await this.getOne(maxId, { ...query, box: this.openedBox?.name });
+  }
+
+  async getMails(query: MessageQuery): Promise<List<PreparedMessage>> {
+    // console.time("Search ids");
+    const box = query.box ?? this.conversationBox;
+    await this.openBox(box);
+
+    let ids = await this.searchEmails(query);
+    const count = ids.length;
+    // console.timeEnd("Search ids");
+    // console.log("ids count: ", count);
+
+    // ids.forEach(i => console.log("id: " + i));
+
+    // apply pagination if no pagination by time
+    if (query.searchEmail && query.take) {
+      const hasDatePagination = !!query.sentBefore;
+      const paginationScaleFactor = hasDatePagination ? 1 : 10;
+
+      const skip = Math.round((query.skip ?? 0) / paginationScaleFactor);
+      const take = Math.round((query.take ?? 10) * paginationScaleFactor);
+
+      // console.log("query: ", query);
+      // console.log("page: ", { skip, take });
+
+      // console.time("pagination");
+      const end = count - skip;
+      let start = end - take;
+      if (start < 0) {
+        start = 0;
+      }
+      if (end <= 0) {
+        return { count, items: [] };
+      }
+      // console.log("start: ", start);
+      // console.log("end: ", end);
+      ids = ids.slice(start, end);
+      // console.log("ids: ", ids);
+      // console.timeEnd("pagination");
+    }
+
+    if (!ids?.length) {
+      return { count, items: [] };
+    }
+
+    const loadOptions = this.buildLoadOptions(query, box);
+    const bodies = this.buildBodiesQuery(query);
+
+    // console.time("Structure and headers");
+    const messages = await this.readMessages(ids, bodies, loadOptions);
+    // console.timeEnd("Structure and headers");
+
+    const items = [] as PreparedMessage[];
+    let email: NativeMessage;
+    let prepared: PreparedMessage;
+    let emailDate: Date;
+
+    const sendBefore = (query.sentBefore || new Date()).getTime();
+    const sendAfter = (query.sentAfter || new Date(1990, 1, 1)).getTime();
+
+    for (let i = messages.length - 1; i >= 0; i--) {
+      email = messages[i];
+      emailDate = new Date(email.date);
+      const timestamp = emailDate.getTime();
+
+      if (timestamp < sendBefore && timestamp > sendAfter) {
+        prepared = this.nativeMessageToPrepared(email, query, box);
+        items.push(prepared);
+      }
+    }
+
+    return { count, items };
+  }
+
+  async getOne(uid: number, query: MessageQuery): Promise<PreparedMessage | null> {
+    const box = query?.box ?? this.conversationBox;
+    const mail = await this.getOneNative(uid, query);
+    return mail && this.nativeMessageToPrepared(mail, query, box);
+  }
+
+  private async getOneNative(uid: number, query: MessageQuery): Promise<NativeMessage | null> {
+    const box = query?.box ?? this.conversationBox;
+    await this.openBox(box);
+
+    const loadOptions = this.buildLoadOptions(query, box);
+    const bodies = this.buildBodiesQuery(query);
+
+    const queue = this.imap.fetch([+uid], { bodies, struct: true });
+    return new Promise<NativeMessage | null>((resolve, reject) => {
+      let isExist = false;
+      queue.once("error", reject);
+
+      queue.once("message", async (m: ImapMessage) => {
+        isExist = true;
+        this.readMessage(m, loadOptions).then(resolve).catch(reject);
+      });
+
+      queue.once("end", () => {
+        if (!isExist) {
+          resolve(null);
+        }
+      });
+    });
+  }
+
+  /**
+   * Method reads the messages by query;
+   * @param query -- list of message ids or criteria
+   * @param bodies -- parts of message that need to be queried
+   * @param options -- has to parameters:
+   *  - loadStructure -- set true if structure is needed
+   *  - rawData -- set true if you do not need to parse headers, just return string of bytes
+   */
+  private async readMessages(query: any, bodies: string[], options: LoadOptions): Promise<NativeMessage[]> {
+    interface OrderedMessage {
+      message: Promise<NativeMessage>;
+      order: number;
+    }
+
+    return new Promise<NativeMessage[]>((resolve, reject) => {
+      this.currentOperations.push({ reject });
+      // console.log("options: ", options);
+      const queue = this.imap.fetch(query, { bodies, struct: options?.loadStructure });
+      const messages: OrderedMessage[] = [];
+
+      queue.on("message", async (message, order) => {
+        // console.count("message");
+        messages.push({
+          message: this.readMessage(message, { ...options }),
+          order
+        });
+      });
+
+      queue.once("error", reject);
+
+      queue.once("end", async () => {
+        // console.count("MESSAGES END");
+        Promise.all(messages
+          .sort((m1, m2) => m1.order - m2.order)
+          .map(m => m.message))
+          .then(resolve)
+          .catch(reject);
+      });
+    });
+  }
+
+  private async readMessage(m: ImapMessage, options: LoadOptions): Promise<NativeMessage> {
+    return new Promise<NativeMessage>((resolve, reject) => {
+      const headerChunks: NodeJS.ReadableStream[] = [];
+      const dataChunks: NodeJS.ReadableStream[] = [];
+      let uid!: number;
+      let seen = false;
+      let struct: MessageStructure | null;
+      let threadId: string | undefined;
+      // console.log("start reading message");
+
+      m.on("body", (stream, info) => {
+        // console.log("message body", info);
+        const isBody = info.which === this.BODY_PART_INDEX;
+        const chunks = isBody ? dataChunks : headerChunks;
+        chunks.push(stream);
+
+        // setTimeout(() => { // @ts-ignore
+        //   uid ??= info.seqno;
+        //   m.emit("end");
+        // }, 100);
+      });
+
+      m.once("attributes", (attributes) => {
+        // console.count("message attributes");
+        uid = attributes.uid as number;
+        struct = MailParser.parseMessageStructure(attributes.struct);
+        seen = attributes.flags?.includes(ImapMail.SEEN_FLAG) ?? false;
+        threadId = attributes[ImapMail.THREAD_ID_FLAG];
+      });
+
+      m.once("end", async () => {
+        try {
+          const bodyStruct = MailParser.getBodyStruct(struct);
+          options.charset = options?.charset ?? bodyStruct?.charset;
+          options.encoding = options?.encoding ?? bodyStruct?.encoding;
+          const [headersPayload, dataPayload] = await Promise.all([
+            Promise.all(headerChunks.map(s => MailDecoder.decodeStream(s, options))),
+            Promise.all(dataChunks.map(s => MailDecoder.decodeStream(s, options)))
+          ]);
+
+          if (dataPayload.length > 1 || headersPayload.length > 1) {
+            console.warn("WARNING OF BODY OR PAYLOAD BIGGER THAN 1");
+            console.warn("body", dataPayload);
+            console.warn("payload", headersPayload);
+          }
+
+          const [headersString] = headersPayload;
+          const [rawData] = dataPayload;
+
+          const headers = MailParser.parseHeaders(this.accountMail, headersString) as NativeMessage;
+          const result: NativeMessage = {
+            ...headers,
+            uid,
+            seen,
+            struct,
+            threadId,
+            contentType: bodyStruct?.contentType,
+            encoding: options?.encoding
+          };
+
+          if (rawData) {
+            // console.log("bodyStruct: ", bodyStruct);
+            const { body, contentType } = MailParser.parseBodyPart(uid, rawData, struct, options);
+            result.rawData = body;
+
+            if (contentType) {
+              result.contentType = contentType;
+              if (bodyStruct?.contentType && contentType !== bodyStruct?.contentType) {
+                console.warn("\nCONTENT TYPE DON'T MATCH: ");
+                console.warn("bodyStruct: ", bodyStruct.contentType);
+                console.warn("parsed: ", contentType);
+                result.contentType = body.includes("</") ? MimeType.html : MimeType.txt;
+              }
+            } else if (result.contentType === MimeType.html || !result.contentType) {
+              result.contentType = body.includes("</") ? MimeType.html : MimeType.txt;
+            }
+          }
+
+          // console.log("result: ", result);
+          resolve(result);
+        } catch (err) {
+          reject(err);
+        }
+      });
+    });
+  }
+
+  private rejectAllOperations(cause: string, err?: unknown): void {
+    err && console.warn(`reject all operation for ${ this.account }. Cause: `, cause);
+    this.openedBox = undefined;
     this._isConnected = false;
     while (this.currentOperations.length > 0) {
       const operation = this.currentOperations.shift();
@@ -427,4 +523,66 @@ export class ImapMail {
     }
   }
 
+  private nativeMessageToPrepared<T>(native: NativeMessage, query: MessageQuery<T>, box: string): PreparedMessage<T> {
+    const prepared = {
+      uid: native.uid,
+      from: native.from,
+      to: native.to,
+      date: new Date(native.date),
+      subject: native.subject,
+      seen: native.seen,
+      threadId: native.threadId,
+      contentType: native.contentType,
+      messageId: native["message-id"],
+      box
+    } as PreparedMessage<T>;
+
+    if (query.attachments) {
+      prepared.attachments = native.struct?.attachments || [];
+    }
+
+    const isOutbound = native.from?.toLowerCase() === this.account.toLowerCase();
+
+    if (query.body) {
+      prepared.body = native.rawData?.trim() || "";
+
+      if (query.senderDataParser && isOutbound) {
+        prepared.sender = query.senderDataParser(prepared.body);
+      }
+    }
+
+    if (query.includeDirection) {
+      prepared.isInbound = !isOutbound;
+    }
+    if (query.includeAccount) {
+      prepared.account = this.account;
+    }
+
+    return prepared;
+  }
+
+  private buildLoadOptions(query: MessageQuery, box: string): LoadOptions {
+    return {
+      loadStructure: query.body || query.attachments,
+      inlineAttachmentReplacer: query.inlineAttachmentReplacer,
+      account: this.account,
+      box
+    };
+  }
+
+  private buildBodiesQuery(query: MessageQuery): string[] {
+    // return ["", "TEXT"];
+    const bodies = [] as string[];
+    if (query.headers?.length) {
+      bodies.push(
+        this.isGmail
+          ? `HEADER.FIELDS (${ query.headers.join(" ") })`
+          : "HEADER"
+      );
+    }
+    if (query.body) {
+      bodies.push(this.BODY_PART_INDEX);
+    }
+    return bodies;
+  }
 }
