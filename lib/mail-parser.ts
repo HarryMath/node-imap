@@ -1,9 +1,10 @@
-import { Attachment, BodyPart, MessageStructure, NativeMessage } from "../types/message";
-import { MailDecoder } from "./mail-decoder";
-import { LoadOptions } from "../types/query";
-import { Replacer } from "./replacer";
-import { MimeType } from "../types/util";
-const Imap = require("imap");
+import { Attachment, BodyPart, MessageStructure, NativeMessage } from '../types/message';
+import { MailDecoder } from './mail-decoder';
+import { LoadOptions } from '../types/query';
+import { Replacer } from './replacer';
+import { MimeType } from '../types/util';
+
+const Imap = require('imap');
 
 export class MailParser {
 
@@ -19,40 +20,42 @@ export class MailParser {
   }
 
   private static normalizeAddress(header: string, accountMail?: string): string {
-    const address = header.includes("<") ? header.substring(
-      header.indexOf("<") + 1,
-      header.lastIndexOf(">")
+    const address = header.includes('<') ? header.substring(
+      header.indexOf('<') + 1,
+      header.lastIndexOf('>')
     ) : header;
 
     // specify account mail in "from" field for handling strange outlook behavior
-    return address.includes("=") || address.length > 128
+    return address.includes('=') || address.length > 128
       ? accountMail ?? address
       : address;
   }
 
   static parseMessageStructure(struct: any): MessageStructure | null {
-    if (!struct) { return null; }
+    if (!struct) {
+      return null;
+    }
 
     if (struct.partID && struct.type) {
-      if (struct.type === "text" && !struct.disposition) {
+      if (struct.type === 'text' && !struct.disposition) {
         return {
           body: [{
             charset: struct.params?.charset,
             partId: struct.partID,
             encoding: struct.encoding?.toLowerCase(),
-            contentType: struct.type + "/" + struct.subtype,
+            contentType: struct.type + '/' + struct.subtype
           }],
-          attachments: [],
+          attachments: []
         };
       }
-      if (["ATTACHMENT", "INLINE", "inline", "attachment"].includes(struct.disposition?.type)) {
-        let fileName = struct.params?.name || struct.disposition.params?.fileName || struct.subtype || struct.type || "unknown";
+      if (['ATTACHMENT', 'INLINE', 'inline', 'attachment'].includes(struct.disposition?.type)) {
+        let fileName = struct.params?.name || struct.disposition.params?.fileName || struct.subtype || struct.type || 'unknown';
         fileName = MailDecoder.decodeFileName(fileName);
         let attachmentId = struct?.id;
-        if (typeof attachmentId === "string") {
+        if (typeof attachmentId === 'string') {
           attachmentId = attachmentId
-            .replace("<", "")
-            .replace(">", "")
+            .replace('<', '')
+            .replace('>', '')
             .trim();
         }
 
@@ -63,16 +66,14 @@ export class MailParser {
             size: struct.size,
             encoding: struct.encoding?.toLowerCase(),
             charset: struct.params?.charset,
-            contentType: struct.type + "/" + struct.subtype,
-            isInline: struct.disposition.type?.toLowerCase() === "inline",
+            contentType: struct.type + '/' + struct.subtype,
+            isInline: struct.disposition.type?.toLowerCase() === 'inline',
 
             attachmentId
           }]
         };
       }
-    }
-
-    else if (Array.isArray(struct)) {
+    } else if (Array.isArray(struct)) {
       const childStructures = struct.map(s => MailParser.parseMessageStructure(s));
       const attachments: Attachment[] = [];
       const body: BodyPart[] = [];
@@ -111,15 +112,15 @@ export class MailParser {
 
     if (!part) {
       return {
-        body: MailDecoder.decodeRawData(rawData, options?.encoding, options?.charset),
+        body: MailDecoder.decodeRawData(rawData, options?.encoding, options?.charset)
       };
     }
 
     let body = part.body
-      .split("--")
+      .split('--')
       .filter(Boolean)
       .slice(0, -1)
-      .join("--")
+      .join('--')
       .trim();
 
     if (!body) {
@@ -128,23 +129,23 @@ export class MailParser {
       };
     }
 
-    if (body.includes("Content-Transfer-Encoding:")) {
+    if (body.includes('Content-Transfer-Encoding:')) {
       // const encoding = finalBody.split("Content-Transfer-Encoding:")[1]?.split("\n")[0]?.trim();
-      const encoding = MailParser.parseInlineHeader(body, "Content-Transfer-Encoding");
-      const data = body.split(encoding || "no-encoding")[1]?.trim();
+      const encoding = MailParser.parseInlineHeader(body, 'Content-Transfer-Encoding');
+      const data = body.split(encoding || 'no-encoding')[1]?.trim();
       body = MailDecoder.decodeRawData(data || body, encoding);
     }
 
     body = Replacer.replace(body, /src="cid:(.*?)"/gi, src => {
-      const attachmentId = src.split("cid:")[1]?.replace(/"/g, "");
+      const attachmentId = src.split('cid:')[1]?.replace(/"/g, '');
       let inlineAttachment = MailParser.parseInlineAttachment(rawData, attachmentId);
       if (!inlineAttachment) {
         const attachment = struct?.attachments?.find(a => a.attachmentId === attachmentId);
         if (attachment?.partId) {
-          inlineAttachment = options?.inlineAttachmentReplacer?.(messageUid, attachment, options.account, options.box) ?? "part:" + attachment.partId;
+          inlineAttachment = options?.inlineAttachmentReplacer?.(messageUid, attachment, options.account, options.box) ?? 'part:' + attachment.partId;
         }
       }
-      return `src="${(inlineAttachment || attachmentId)}"`;
+      return `src="${ (inlineAttachment || attachmentId) }"`;
     });
 
     part.body = body;
@@ -157,7 +158,7 @@ export class MailParser {
     }
 
     const bodies = struct.body
-      .filter(b => b.partId?.startsWith("1") && b.contentType.includes("text"));
+      .filter(b => b.partId?.startsWith('1') && b.contentType.includes('text'));
 
     return bodies.find(b => b.contentType = MimeType.html) ||
       bodies.find(b => b.contentType = MimeType.txt) ||
@@ -165,36 +166,36 @@ export class MailParser {
   }
 
   private static parseInlineAttachment(rawData: string, attachmentId: string): string | undefined {
-    const key = `X-Attachment-Id: ${attachmentId}`;
+    const key = `X-Attachment-Id: ${ attachmentId }`;
     if (!rawData.includes(key)) {
       return undefined;
     }
     const parts = rawData.split(key);
-    const headers = "Content-Type:" + parts[0].split("Content-Type:").pop();
-    const body = parts[1].split("--")[0];
+    const headers = 'Content-Type:' + parts[0].split('Content-Type:').pop();
+    const body = parts[1].split('--')[0];
     if (!body || !headers) {
-      console.warn("NO BODY OR HEADERS in parseInlineAttachment()");
+      console.warn('NO BODY OR HEADERS in parseInlineAttachment()');
       return undefined;
     }
 
-    let contentType = MailParser.parseInlineHeader(headers, "Content-Type");
-    if (contentType?.includes("name=")) {
-      contentType = contentType.split("name=")[0];
+    let contentType = MailParser.parseInlineHeader(headers, 'Content-Type');
+    if (contentType?.includes('name=')) {
+      contentType = contentType.split('name=')[0];
     }
 
-    const encoding = MailParser.parseInlineHeader(headers.toLowerCase(), "encoding");
-    const prefix = "data:" + contentType + ";" + encoding;
-    return prefix + ", " + body.trim();
+    const encoding = MailParser.parseInlineHeader(headers.toLowerCase(), 'encoding');
+    const prefix = 'data:' + contentType + ';' + encoding;
+    return prefix + ', ' + body.trim();
   }
 
   private static parseInlineHeader(rawData: string, header: string): string | undefined {
-    const headerRightPart = rawData.split(header + ":")[1]?.trim();
+    const headerRightPart = rawData.split(header + ':')[1]?.trim();
     if (!headerRightPart) {
       return undefined;
     }
-    let value = headerRightPart.split("\n")[0];
-    if (value?.includes("\r")) {
-      value = value.split("\r")[0];
+    let value = headerRightPart.split('\n')[0];
+    if (value?.includes('\r')) {
+      value = value.split('\r')[0];
     }
     return value?.trim();
   }
@@ -204,7 +205,7 @@ export class MailParser {
       return {};
     }
     Object.keys(o).forEach(key => {
-      o[key] = (o[key][0] || "") as any;
+      o[key] = (o[key][0] || '') as any;
     });
     return o as any;
   }
