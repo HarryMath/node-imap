@@ -1,12 +1,13 @@
-import { ImapCredentials, ImapMail } from './lib/imap-mail';
+import { ImapMail } from './lib/imap-mail';
+import { ImapConfig } from './types/credentials';
 
-const credential: ImapCredentials = {
+const credential: ImapConfig = {
   host: 'imap.yandex.ru',
   port: 993,
   tls: true,
   password: '...',
   user: '...',
-  box: 'INBOX',
+  conversationBox: 'INBOX',
 };
 
 async function test() {
@@ -24,11 +25,11 @@ async function test() {
   // const nextUid = await imap.getNextUid();
   // console.log('nextUid: ' + nextUid);
 
-  await imap.openBox('INBOX');
+  // await imap.openBox('INBOX');
 
   const mails = await imap.getMails({
-    searchEmail: 'litvinskia@gmail.com',
-    // searchEmail: 'nikitabort22092000@gmail.com',
+    // searchEmail: 'litvinskia@gmail.com',
+    searchEmail: 'nikitabort22092000@gmail.com',
     body: true,
     attachments: true,
     skip: 0,
