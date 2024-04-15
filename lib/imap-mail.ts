@@ -1,15 +1,15 @@
-import * as Connection from "imap";
-import { Box, ImapMessage, MailBoxes } from "imap";
-import { DateUtil, MailHeaders, MimeType } from "../types/util";
-import { ImapConfig } from "../types/credentials";
-import { LoadOptions, MessageQuery, SearchOptions } from "../types/query";
-import { SearchBuilder } from "./search-builder";
-import { MessageStructure, NativeMessage, PreparedMessage } from "../types/message";
-import { List } from "../types/list";
-import { MailParser } from "./mail-parser";
-import { MailDecoder } from "./mail-decoder";
+import * as Connection from 'imap';
+import { Box, ImapMessage, MailBoxes } from 'imap';
+import { DateUtil, MailHeaders, MimeType } from '../types/util';
+import { ImapConfig } from '../types/credentials';
+import { LoadOptions, MessageQuery, SearchOptions } from '../types/query';
+import { SearchBuilder } from './search-builder';
+import { MessageStructure, NativeMessage, PreparedMessage } from '../types/message';
+import { List } from '../types/list';
+import { MailParser } from './mail-parser';
+import { MailDecoder } from './mail-decoder';
 
-const Imap = require("imap");
+const Imap = require('imap');
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = 0;
@@ -19,15 +19,15 @@ interface AsyncOperation {
 }
 
 export class ImapMail {
-  private static readonly THREAD_ID_FLAG = "x-gm-thrid"; // X-GM-THRID
-  private static readonly SEEN_FLAG = "\\Seen";
-  static readonly SENT_BOX = "Sent";
+  private static readonly THREAD_ID_FLAG = 'x-gm-thrid'; // X-GM-THRID
+  private static readonly SEEN_FLAG = '\\Seen';
+  static readonly SENT_BOX = 'Sent';
 
   private get BODY_PART_INDEX() {
-    return this.isGmail ? "1" : "TEXT";
+    return this.isGmail ? '1' : 'TEXT';
   }
 
-  static readonly ALL_HEADERS: MailHeaders[] = ["FROM", "TO", "DATE", "SUBJECT", "MESSAGE-ID"];
+  static readonly ALL_HEADERS: MailHeaders[] = ['FROM', 'TO', 'DATE', 'SUBJECT', 'MESSAGE-ID'];
 
   private currentOperations: AsyncOperation[] = [];
   private _isConnected = true;
@@ -45,8 +45,9 @@ export class ImapMail {
   private constructor(
     private readonly imap: Connection,
     public readonly conversationBox: string,
-    private readonly account: string,
-  ) {};
+    private readonly account: string
+  ) {
+  };
 
   private async openBox(boxName: string): Promise<Box> {
     if (this.openedBox?.name === boxName) {
@@ -79,18 +80,18 @@ export class ImapMail {
     return new Promise((resolve, reject) => {
       this.imap.connect();
 
-      this.imap.once("ready", () => {
+      this.imap.once('ready', () => {
         this._isConnected = true;
         resolve();
       });
 
-      this.imap.once("error", (err: Error) => {
-        this.rejectAllOperations("Error " + (err.message || err.name), err);
+      this.imap.once('error', (err: Error) => {
+        this.rejectAllOperations('Error ' + (err.message || err.name), err);
         reject(err);
       });
 
-      this.imap.once("end", () => {
-        this.rejectAllOperations("Client closed", null);
+      this.imap.once('end', () => {
+        this.rejectAllOperations('Client closed', null);
         reject(null);
       });
     });
@@ -110,7 +111,7 @@ export class ImapMail {
       });
 
       const client = new ImapMail(imap, conversationBox, user);
-      client.isGmail = !!isGmail || user.endsWith("@gmail.com");
+      client.isGmail = !!isGmail || user.endsWith('@gmail.com');
 
       client.reconnect()
         .then(() => resolve(client))
@@ -156,7 +157,7 @@ export class ImapMail {
 
   async getBoxes(): Promise<string[]> {
     const boxes = await this.getNativeBoxes();
-    return this.getBoxDto("", boxes);
+    return this.getBoxDto('', boxes);
   }
 
   private getBoxDto(boxName: string, children?: MailBoxes): string[] {
@@ -168,7 +169,7 @@ export class ImapMail {
     const result = [];
     for (const c in children) {
       if (c) {
-        const nextBoxName = [boxName, c].filter(p => p.length).join("/");
+        const nextBoxName = [boxName, c].filter(p => p.length).join('/');
         const boxes = this.getBoxDto(nextBoxName, children[c]?.children);
         result.push(...boxes);
       }
@@ -193,7 +194,7 @@ export class ImapMail {
     let searchEmail = options?.searchEmail || [];
     let uid = options?.sinceUid || 0;
 
-    if (typeof searchEmail === "string") {
+    if (typeof searchEmail === 'string') {
       searchEmail = [searchEmail];
     }
 
@@ -203,19 +204,19 @@ export class ImapMail {
     }
 
     if (options?.sinceUid) {
-      criteria.push(["UID", `${ ++uid }:*`]);
+      criteria.push(['UID', `${ ++uid }:*`]);
     }
 
     if (options?.sentBefore) {
       const date = DateUtil.withOffset(options.sentBefore, 1);
       const dateCriteria = DateUtil.dateOnly(date);
-      criteria.push(["SENTBEFORE", dateCriteria]);
+      criteria.push(['SENTBEFORE', dateCriteria]);
     }
 
     if (options?.sentAfter) {
       const date = DateUtil.withOffset(options.sentAfter, -1);
       const dateCriteria = DateUtil.dateOnly(date);
-      criteria.push(["SENTSINCE", dateCriteria]);
+      criteria.push(['SENTSINCE', dateCriteria]);
     }
 
     if (options?.threadId) {
@@ -243,10 +244,10 @@ export class ImapMail {
     await this.openBox(box || this.conversationBox);
     return new Promise<NodeJS.ReadableStream>((resolve, reject) => {
       const queue = this.imap.fetch([uid], { bodies: [partId] });
-      queue.once("message", (m: any) => {
-        m.on("body", (stream: any) => resolve(stream));
+      queue.once('message', (m: any) => {
+        m.on('body', (stream: any) => resolve(stream));
       });
-      queue.once("error", reject);
+      queue.once('error', reject);
     });
   }
 
@@ -370,14 +371,14 @@ export class ImapMail {
     const queue = this.imap.fetch([+uid], { bodies, struct: true });
     return new Promise<NativeMessage | null>((resolve, reject) => {
       let isExist = false;
-      queue.once("error", reject);
+      queue.once('error', reject);
 
-      queue.once("message", async (m: ImapMessage) => {
+      queue.once('message', async (m: ImapMessage) => {
         isExist = true;
         this.readMessage(m, loadOptions).then(resolve).catch(reject);
       });
 
-      queue.once("end", () => {
+      queue.once('end', () => {
         if (!isExist) {
           resolve(null);
         }
@@ -405,7 +406,7 @@ export class ImapMail {
       const queue = this.imap.fetch(query, { bodies, struct: options?.loadStructure });
       const messages: OrderedMessage[] = [];
 
-      queue.on("message", async (message, order) => {
+      queue.on('message', async (message, order) => {
         // console.count("message");
         messages.push({
           message: this.readMessage(message, { ...options }),
@@ -413,9 +414,9 @@ export class ImapMail {
         });
       });
 
-      queue.once("error", reject);
+      queue.once('error', reject);
 
-      queue.once("end", async () => {
+      queue.once('end', async () => {
         // console.count("MESSAGES END");
         Promise.all(messages
           .sort((m1, m2) => m1.order - m2.order)
@@ -436,7 +437,7 @@ export class ImapMail {
       let threadId: string | undefined;
       // console.log("start reading message");
 
-      m.on("body", (stream, info) => {
+      m.on('body', (stream, info) => {
         // console.log("message body", info);
         const isBody = info.which === this.BODY_PART_INDEX;
         const chunks = isBody ? dataChunks : headerChunks;
@@ -448,7 +449,7 @@ export class ImapMail {
         // }, 100);
       });
 
-      m.once("attributes", (attributes) => {
+      m.once('attributes', (attributes) => {
         // console.count("message attributes");
         uid = attributes.uid as number;
         struct = MailParser.parseMessageStructure(attributes.struct);
@@ -456,7 +457,7 @@ export class ImapMail {
         threadId = attributes[ImapMail.THREAD_ID_FLAG];
       });
 
-      m.once("end", async () => {
+      m.once('end', async () => {
         try {
           const bodyStruct = MailParser.getBodyStruct(struct);
           options.charset = options?.charset ?? bodyStruct?.charset;
@@ -467,9 +468,9 @@ export class ImapMail {
           ]);
 
           if (dataPayload.length > 1 || headersPayload.length > 1) {
-            console.warn("WARNING OF BODY OR PAYLOAD BIGGER THAN 1");
-            console.warn("body", dataPayload);
-            console.warn("payload", headersPayload);
+            console.warn('WARNING OF BODY OR PAYLOAD BIGGER THAN 1');
+            console.warn('body', dataPayload);
+            console.warn('payload', headersPayload);
           }
 
           const [headersString] = headersPayload;
@@ -494,13 +495,13 @@ export class ImapMail {
             if (contentType) {
               result.contentType = contentType;
               if (bodyStruct?.contentType && contentType !== bodyStruct?.contentType) {
-                console.warn("\nCONTENT TYPE DON'T MATCH: ");
-                console.warn("bodyStruct: ", bodyStruct.contentType);
-                console.warn("parsed: ", contentType);
-                result.contentType = body.includes("</") ? MimeType.html : MimeType.txt;
+                console.warn('\nCONTENT TYPE DON\'T MATCH: ');
+                console.warn('bodyStruct: ', bodyStruct.contentType);
+                console.warn('parsed: ', contentType);
+                result.contentType = body.includes('</') ? MimeType.html : MimeType.txt;
               }
             } else if (result.contentType === MimeType.html || !result.contentType) {
-              result.contentType = body.includes("</") ? MimeType.html : MimeType.txt;
+              result.contentType = body.includes('</') ? MimeType.html : MimeType.txt;
             }
           }
 
@@ -533,7 +534,7 @@ export class ImapMail {
       seen: native.seen,
       threadId: native.threadId,
       contentType: native.contentType,
-      messageId: native["message-id"],
+      messageId: native['message-id'],
       box
     } as PreparedMessage<T>;
 
@@ -544,7 +545,7 @@ export class ImapMail {
     const isOutbound = native.from?.toLowerCase() === this.account.toLowerCase();
 
     if (query.body) {
-      prepared.body = native.rawData?.trim() || "";
+      prepared.body = native.rawData?.trim() || '';
 
       if (query.senderDataParser && isOutbound) {
         prepared.sender = query.senderDataParser(prepared.body);
@@ -576,8 +577,8 @@ export class ImapMail {
     if (query.headers?.length) {
       bodies.push(
         this.isGmail
-          ? `HEADER.FIELDS (${ query.headers.join(" ") })`
-          : "HEADER"
+          ? `HEADER.FIELDS (${ query.headers.join(' ') })`
+          : 'HEADER'
       );
     }
     if (query.body) {
