@@ -18,7 +18,7 @@ interface AsyncOperation {
   reject: (err?: unknown) => void;
 }
 
-export class ImapMail {
+export class ImapClient {
   private static readonly THREAD_ID_FLAG = 'x-gm-thrid'; // X-GM-THRID
   private static readonly SEEN_FLAG = '\\Seen';
   static readonly SENT_BOX = 'Sent';
@@ -97,7 +97,7 @@ export class ImapMail {
     });
   }
 
-  static async init(credentials: ImapConfig, isGmail?: boolean, timeout = 2000): Promise<ImapMail> {
+  static async init(credentials: ImapConfig, isGmail?: boolean, timeout = 2000): Promise<ImapClient> {
     return new Promise(async (resolve, reject) => {
       const { user, password, conversationBox } = credentials;
 
@@ -110,7 +110,7 @@ export class ImapMail {
         authTimeout: timeout * 2
       });
 
-      const client = new ImapMail(imap, conversationBox, user);
+      const client = new ImapClient(imap, conversationBox, user);
       client.isGmail = !!isGmail || user.endsWith('@gmail.com');
 
       client.reconnect()
@@ -132,7 +132,7 @@ export class ImapMail {
   async setUnSeen(uid: number): Promise<void> {
     await this.openBox(this.conversationBox);
     return new Promise<void>((resolve, reject) => {
-      this.imap.delFlags([uid], [ImapMail.SEEN_FLAG], (e) => {
+      this.imap.delFlags([uid], [ImapClient.SEEN_FLAG], (e) => {
         if (e) {
           reject(e);
         } else {
@@ -145,7 +145,7 @@ export class ImapMail {
   async setSeen(uid: number): Promise<void> {
     await this.openBox(this.conversationBox);
     return new Promise<void>((resolve, reject) => {
-      this.imap.setFlags([uid], [ImapMail.SEEN_FLAG], (e) => {
+      this.imap.setFlags([uid], [ImapClient.SEEN_FLAG], (e) => {
         if (e) {
           reject(e);
         } else {
@@ -220,7 +220,7 @@ export class ImapMail {
     }
 
     if (options?.threadId) {
-      criteria.push([ImapMail.THREAD_ID_FLAG.toUpperCase(), String(options.threadId)]);
+      criteria.push([ImapClient.THREAD_ID_FLAG.toUpperCase(), String(options.threadId)]);
     }
 
     return new Promise<any>((resolve, reject) => {
@@ -256,7 +256,7 @@ export class ImapMail {
     let latest = await this.getLatestInCurrentBox(searchEmail, query);
 
     if (!this.isGmail) {
-      await this.openBox(ImapMail.SENT_BOX);
+      await this.openBox(ImapClient.SENT_BOX);
       const latestSent = await this.getLatestInCurrentBox(searchEmail, query);
       latest ??= latestSent;
 
@@ -453,8 +453,8 @@ export class ImapMail {
         // console.count("message attributes");
         uid = attributes.uid as number;
         struct = MailParser.parseMessageStructure(attributes.struct);
-        seen = attributes.flags?.includes(ImapMail.SEEN_FLAG) ?? false;
-        threadId = attributes[ImapMail.THREAD_ID_FLAG];
+        seen = attributes.flags?.includes(ImapClient.SEEN_FLAG) ?? false;
+        threadId = attributes[ImapClient.THREAD_ID_FLAG];
       });
 
       m.once('end', async () => {

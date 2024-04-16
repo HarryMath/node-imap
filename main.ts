@@ -1,4 +1,4 @@
-import { ImapMail } from './lib/imap-mail';
+import { ImapClient } from './lib/imap-client';
 import { ImapConfig } from './lib/types/credentials';
 
 const credential: ImapConfig = {
@@ -11,7 +11,7 @@ const credential: ImapConfig = {
 };
 
 async function test() {
-  const imap = await ImapMail.init(credential);
+  const imap = await ImapClient.init(credential);
   // const boxes = await imap.getBoxes();
   // for (const box of boxes) {
   //   try {
