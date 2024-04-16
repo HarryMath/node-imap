@@ -40,9 +40,8 @@ export abstract class MailDecoder {
   static async decodeStream(stream: NodeJS.ReadableStream, options?: LoadOptions): Promise<string> {
     // eslint-disable-next-line @typescript-eslint/ban-ts-comment
     // @ts-ignore
-    // handle empty stream
     if (!stream._readableState.length || !stream.readable) {
-      return '';
+      return ''; // handle empty stream
     }
 
     const buffer: Buffer[] = [];
