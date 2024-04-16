@@ -1,5 +1,4 @@
-import * as Connection from 'imap';
-import { Box, ImapMessage, MailBoxes } from 'imap';
+import { Box, Config, ImapMessage, MailBoxes } from 'imap';
 import { DateUtil, MailHeaders, MimeType } from './types/util';
 import { ImapConfig } from './types/credentials';
 import { LoadOptions, MessageQuery, SearchOptions } from './types/query';
@@ -8,8 +7,7 @@ import { MessageStructure, NativeMessage, PreparedMessage } from './types/messag
 import { List } from './types/list';
 import { MailParser } from './mail-parser';
 import { MailDecoder } from './mail-decoder';
-
-const Imap = require('imap');
+import * as Imap from 'imap';
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = 0;
@@ -43,7 +41,7 @@ export class ImapClient {
   }
 
   private constructor(
-    private readonly imap: Connection,
+    private readonly imap: Imap,
     public readonly conversationBox: string,
     private readonly account: string
   ) {
@@ -57,7 +55,7 @@ export class ImapClient {
       // console.log(`Opening box ${boxName}...`);
     }
 
-    return new Promise((resolve, reject) => {
+    return new Promise<Box>((resolve, reject) => {
       this.imap.openBox(boxName, (err, box) => {
         if (err) {
           reject(err);
@@ -77,7 +75,7 @@ export class ImapClient {
     } catch (ignore) {
     }
 
-    return new Promise((resolve, reject) => {
+    return new Promise<void>((resolve, reject) => {
       this.imap.connect();
 
       this.imap.once('ready', () => {
@@ -98,7 +96,7 @@ export class ImapClient {
   }
 
   static async init(credentials: ImapConfig, isGmail?: boolean, timeout = 2000): Promise<ImapClient> {
-    return new Promise(async (resolve, reject) => {
+    return new Promise<ImapClient>(async (resolve, reject) => {
       const { user, password, conversationBox } = credentials;
 
       const imap = new Imap({
@@ -108,7 +106,7 @@ export class ImapClient {
         tls: credentials.tls ?? true,
         socketTimeout: timeout,
         authTimeout: timeout * 2
-      });
+      } as Config);
 
       const client = new ImapClient(imap, conversationBox, user);
       client.isGmail = !!isGmail || user.endsWith('@gmail.com');
@@ -166,11 +164,11 @@ export class ImapClient {
       return [boxName];
     }
 
-    const result = [];
+    const result = [] as string[];
     for (const c in children) {
       if (c) {
         const nextBoxName = [boxName, c].filter(p => p.length).join('/');
-        const boxes = this.getBoxDto(nextBoxName, children[c]?.children);
+        const boxes = this.getBoxDto(nextBoxName, children?.[c]?.children);
         result.push(...boxes);
       }
     }
