@@ -1,11 +1,11 @@
 import * as Connection from 'imap';
 import { Box, ImapMessage, MailBoxes } from 'imap';
-import { DateUtil, MailHeaders, MimeType } from '../types/util';
-import { ImapConfig } from '../types/credentials';
-import { LoadOptions, MessageQuery, SearchOptions } from '../types/query';
+import { DateUtil, MailHeaders, MimeType } from './types/util';
+import { ImapConfig } from './types/credentials';
+import { LoadOptions, MessageQuery, SearchOptions } from './types/query';
 import { SearchBuilder } from './search-builder';
-import { MessageStructure, NativeMessage, PreparedMessage } from '../types/message';
-import { List } from '../types/list';
+import { MessageStructure, NativeMessage, PreparedMessage } from './types/message';
+import { List } from './types/list';
 import { MailParser } from './mail-parser';
 import { MailDecoder } from './mail-decoder';
 
@@ -204,7 +204,7 @@ export class ImapMail {
     }
 
     if (options?.sinceUid) {
-      criteria.push(['UID', `${ ++uid }:*`]);
+      criteria.push(['UID', `${++uid}:*`]);
     }
 
     if (options?.sentBefore) {
@@ -515,7 +515,7 @@ export class ImapMail {
   }
 
   private rejectAllOperations(cause: string, err?: unknown): void {
-    err && console.warn(`reject all operation for ${ this.account }. Cause: `, cause);
+    err && console.warn(`reject all operation for ${this.account}. Cause: `, cause);
     this.openedBox = undefined;
     this._isConnected = false;
     while (this.currentOperations.length > 0) {
@@ -577,7 +577,7 @@ export class ImapMail {
     if (query.headers?.length) {
       bodies.push(
         this.isGmail
-          ? `HEADER.FIELDS (${ query.headers.join(' ') })`
+          ? `HEADER.FIELDS (${query.headers.join(' ')})`
           : 'HEADER'
       );
     }

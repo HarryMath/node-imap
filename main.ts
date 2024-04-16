@@ -1,5 +1,5 @@
 import { ImapMail } from './lib/imap-mail';
-import { ImapConfig } from './types/credentials';
+import { ImapConfig } from './lib/types/credentials';
 
 const credential: ImapConfig = {
   host: 'imap.yandex.ru',

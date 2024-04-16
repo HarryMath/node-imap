@@ -1,4 +1,4 @@
-import { Attachment } from "./message";
+import { Attachment } from './message';
 
 export type InlineAttachmentReplacer = (
   attachmentUid: number,
@@ -9,11 +9,11 @@ export type InlineAttachmentReplacer = (
 
 export type ExtraDataParser<T> = (body: string) => T;
 
-export type MailHeaders = "FROM" | "TO" | "SUBJECT" | "DATE" | "MESSAGE-ID";
+export type MailHeaders = 'FROM' | 'TO' | 'SUBJECT' | 'DATE' | 'MESSAGE-ID';
 
 export enum MimeType {
-  html = "text/html",
-  txt = "text/plain",
+  html = 'text/html',
+  txt = 'text/plain',
 }
 
 export const DateUtil = {
@@ -27,4 +27,3 @@ export const DateUtil = {
 
   dateOnly: (date: Date): string => date.toISOString().split('T')[0]
 };
-

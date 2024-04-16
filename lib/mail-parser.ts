@@ -1,8 +1,8 @@
-import { Attachment, BodyPart, MessageStructure, NativeMessage } from '../types/message';
+import { Attachment, BodyPart, MessageStructure, NativeMessage } from './types/message';
 import { MailDecoder } from './mail-decoder';
-import { LoadOptions } from '../types/query';
+import { LoadOptions } from './types/query';
 import { Replacer } from './replacer';
-import { MimeType } from '../types/util';
+import { MimeType } from './types/util';
 
 const Imap = require('imap');
 

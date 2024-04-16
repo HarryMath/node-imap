@@ -1,4 +1,4 @@
-import { LoadOptions } from '../types/query';
+import { LoadOptions } from './types/query';
 
 export abstract class MailDecoder {
 

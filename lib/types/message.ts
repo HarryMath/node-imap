@@ -42,7 +42,6 @@ export interface NativeMessage extends BaseMailMessage {
   rawData?: string;
 }
 
-
 export interface PreparedMessage<SenderInfo = unknown> extends BaseMailMessage {
   body: string;
   account?: string;
@@ -53,4 +52,3 @@ export interface PreparedMessage<SenderInfo = unknown> extends BaseMailMessage {
 
   sender?: SenderInfo;
 }
-
