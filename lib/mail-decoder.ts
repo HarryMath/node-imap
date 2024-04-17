@@ -109,15 +109,18 @@ export abstract class MailDecoder {
 
     switch (encoding) {
       case 'base64':
-        if (!data.includes('text/html') && !data.includes('text/plain')) {
+        const regexp = /^[A-Za-z0-9=+/\n\r]+$/;
+        if (regexp.test(data)) {
           const decoded = Buffer.from(data, 'base64').toString();
           const encoded = Buffer.from(decoded).toString('base64');
-          return MailDecoder.isBase64Equal(encoded, data) ? decoded : data;
-        } else {
-          console.error('WRONG INPUT FOR base64 encoding: ');
-          console.warn(data.substring(0, 300));
+          if (!MailDecoder.isBase64Equal(encoded, data)) {
+            console.warn('WRONG INPUT FOR base64 encoding: ');
+            console.warn(data.substring(0, 50));
+            return data;
+          }
+          return decoded;
         }
-        break;
+        return data;
       case 'quotedprintable':
       case 'qp':
         return MailDecoder.decodeQuotedPrintable(data, charset);

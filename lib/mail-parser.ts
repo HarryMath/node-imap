@@ -3,7 +3,6 @@ import { MailDecoder } from './mail-decoder';
 import { LoadOptions } from './types/query';
 import { Replacer } from './replacer';
 import { MimeType } from './types/util';
-
 const Imap = require('imap');
 
 export class MailParser {
